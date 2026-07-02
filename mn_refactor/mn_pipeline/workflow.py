@@ -645,8 +645,8 @@ class MotoneuronReconstructionPipeline:
             np.save(prefix + "exp_force", self.Force[self.range_start : self.range_stop], allow_pickle=True)
             np.save(prefix + "exp_discharge_times", self.disch_times, allow_pickle=True)
             np.save(prefix + "PRED_discharge_times", self.Firing_times_sim, allow_pickle=True)
-            np.save(
-                prefix + "parameters",
+
+            parameters_payload = np.array(
                 [
                     self.range_start,
                     self.range_stop,
@@ -657,10 +657,11 @@ class MotoneuronReconstructionPipeline:
                     self.cfg.cm_derec_calib,
                     self.cfg.adapt_kR,
                 ],
-                allow_pickle=True,
+                dtype=object,
             )
-            np.save(
-                prefix + "MAIN_results",
+            
+            np.save(prefix + "parameters", parameters_payload, allow_pickle=True)
+            main_results_payload = np.array(
                 [
                     self.Real_MN_pop,
                     self.Calib_sizes,
@@ -675,8 +676,11 @@ class MotoneuronReconstructionPipeline:
                     self.r2_sim,
                     self.nRMSE_sim,
                 ],
-                allow_pickle=True,
+                dtype=object,
             )
+
+            np.save(prefix + "MAIN_results", main_results_payload, allow_pickle=True)
+
             np.save(prefix + "calib_onset_error", self.Calib_delta_tf1, allow_pickle=True)
             np.save(prefix + "calib_nRMSE", self.Calib_RMS_table, allow_pickle=True)
             np.save(prefix + "calib_r2", self.Calib_r2_table, allow_pickle=True)
