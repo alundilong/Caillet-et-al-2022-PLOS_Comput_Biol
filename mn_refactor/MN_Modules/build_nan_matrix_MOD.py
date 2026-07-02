@@ -1,22 +1,16 @@
-""" 
-Author: Arnault CAILLET
-arnault.caillet17@imperial.ac.uk
-July 2022
-Imperial College London
-Department of Civil Engineering
-This code contributes to producing the results presented in the manuscript Caillet et al. 'Estimation of the firing behaviour of a complete motoneuron pool by combining electromyography signal decomposition and realistic motoneuron modelling' (2022)
----------
-"""
+"""Pad ragged firing-time arrays with NaN values."""
+
+from __future__ import annotations
 
 import numpy as np
 
-def build_nan_matrix_func(Firing_times_sim, author, trial='exp'):
-    #Building the matrix with nans
-    max_length=0
-    for i in range(len(Firing_times_sim)): 
-        max_length = max(max_length, len(Firing_times_sim[i]))
-    Firing_times_sim_nan=np.empty((len(Firing_times_sim),max_length), dtype=object) #empty list of 32 cells
-    Firing_times_sim_nan[:]=np.nan
-    for i in range (len(Firing_times_sim)): #looping through the MN data
-        Firing_times_sim_nan[i][0:len(Firing_times_sim[i])]=Firing_times_sim[i]
-    return Firing_times_sim_nan
+
+def build_nan_matrix_func(Firing_times_sim, author, trial="exp"):
+    """Return a rectangular NaN-padded matrix from ragged firing times."""
+    lengths = [len(row) for row in Firing_times_sim]
+    max_length = max(lengths) if lengths else 0
+    out = np.full((len(Firing_times_sim), max_length), np.nan, dtype=float)
+    for i, row in enumerate(Firing_times_sim):
+        values = np.asarray(row, dtype=float).ravel()
+        out[i, : values.size] = values
+    return out

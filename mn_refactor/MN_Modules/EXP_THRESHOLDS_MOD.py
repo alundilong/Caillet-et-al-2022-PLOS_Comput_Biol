@@ -1,67 +1,35 @@
-""" 
-Author: Arnault CAILLET
-arnault.caillet17@imperial.ac.uk
-July 2022
-Imperial College London
-Department of Civil Engineering
-This code contributes to producing the results presented in the manuscript Caillet et al. 'Estimation of the firing behaviour of a complete motoneuron pool by combining electromyography signal decomposition and realistic motoneuron modelling' (2022)
-----------
-"""
+"""Recruitment and derecruitment threshold extraction."""
+
+from __future__ import annotations
+
 import numpy as np
 
+
 def exp_thresholds_func(Nb_MN, MVC, disch_times, common_input, Force, fs=2048):
-    '''
-This function computes the MN CI and force (de)recruitment thresholds 
-from the lists of MN discharge times obtained from decomposed HDEMG signals 
+    """Compute timing, common-input, and force thresholds for each MN.
 
-Parameters
-----------
-Nb_MN : the number of identified discharging MNs, integer
-MVC : target % max voluntary contraction during experiments, integer
-disch_times : the lists of the MN discharge times, matrix
-    The discharge times are typically given in samples (fs=2048 Hz in all 
-    datasets). 
-common_input : Common Input, array
-    Computed as the filtered CST in [0; 10Hz]
-Force : the time-history of exp transducer Force amplitude, array 
-fs : sampling frequency, float
-    Typically 2048Hz, this value is consistent with the exp measures.    
+    Returns a matrix with columns:
+    first time [s], recruitment %CI, recruitment %MVC,
+    last time [s], derecruitment %CI, derecruitment %MVC.
+    """
+    n_mn = int(Nb_MN)
+    ci = np.asarray(common_input, dtype=float).ravel()
+    force = np.asarray(Force, dtype=float).ravel()
+    max_ci = np.max(ci) if np.max(ci) != 0 else 1.0
+    max_force = np.max(force) if np.max(force) != 0 else 1.0
+    thresholds = np.zeros((n_mn, 6), dtype=float)
 
-    
-Returns
--------
-THRESHOLDS : matrix of MN thresholds, matrix
-    THRESHOLDS[0]: list of MN first discharge times [s], precision = ms
-    THRESHOLDS[1]: list of recruitment thresholds (% CI)
-    THRESHOLDS[2]: list of recruitment thresholds (% MVC)
-    THRESHOLDS[3]: list of MN last discharge times [s], precision = ms
-    THRESHOLDS[4]: list of derecruitment thresholds (% CI)
-    THRESHOLDS[5]: list of derecruitment thresholds (% MVC)
-    '''   
-    
-    THRESHOLDS=np.zeros((Nb_MN,6))
-    max_CI=max(common_input) 
-    max_trans_force=max(Force)
-    
-    for i in range (Nb_MN):
-        if Nb_MN==1:
-            first_firing=disch_times[0]
-            last_firing=disch_times[-1]  
-        else:
-            first_firing=disch_times[i][0]
-            last_firing = disch_times[i][-1]                
-        first_disch_time= round(first_firing/fs,3) #seconds
-        CI_th=common_input[int(first_firing)]/max_CI*100
-        F_th=Force[int(first_firing)]/max_trans_force*MVC*100
-        last_disch_time=round(last_firing/fs,3)
-        CI_dth=int(common_input[int(last_firing)]/max_CI*100)
-        F_dth=int(Force[int(last_firing)]/max_trans_force*MVC*100)
-            
-        THRESHOLDS[i][0]=first_disch_time #Time of first discharge (s)
-        THRESHOLDS[i][1]=CI_th # % of common input when the MN discharges for the first time
-        THRESHOLDS[i][2]=F_th #Force recruitment threhsold %MVC
-        THRESHOLDS[i][3]= last_disch_time#time of last discharge
-        THRESHOLDS[i][4]=CI_dth # % of common input when the MN discharges for the last time
-        THRESHOLDS[i][5]=F_dth
-        
-    return THRESHOLDS
+    for i in range(n_mn):
+        spikes = np.asarray(disch_times[i], dtype=int).ravel()
+        if spikes.size == 0:
+            continue
+        first = int(np.clip(spikes[0], 0, min(ci.size, force.size) - 1))
+        last = int(np.clip(spikes[-1], 0, min(ci.size, force.size) - 1))
+        thresholds[i, 0] = round(first / fs, 3)
+        thresholds[i, 1] = ci[first] / max_ci * 100.0
+        thresholds[i, 2] = force[first] / max_force * float(MVC) * 100.0
+        thresholds[i, 3] = round(last / fs, 3)
+        thresholds[i, 4] = int(ci[last] / max_ci * 100.0)
+        thresholds[i, 5] = int(force[last] / max_force * float(MVC) * 100.0)
+
+    return thresholds

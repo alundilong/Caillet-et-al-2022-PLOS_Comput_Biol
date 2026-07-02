@@ -1,37 +1,48 @@
-"""Smooth instantaneous-frequency impulses with a 400 ms Hanning window."""
+"""Hanning-window smoothing for instantaneous discharge-frequency impulses."""
+
+from __future__ import annotations
+
+from functools import lru_cache
 
 import numpy as np
 from scipy import signal
 
 
+@lru_cache(maxsize=8)
+def _hanning_window(fs: float, window_s: float = 0.4):
+    length = max(1, int(round(float(window_s) * float(fs))))
+    win = signal.windows.hann(length)
+    denom = float(np.sum(win))
+    if denom == 0:
+        denom = 1.0
+    return win, denom
+
+
+def _filter_one(values, fs: float):
+    win, denom = _hanning_window(float(fs))
+    return signal.convolve(np.asarray(values, dtype=float), win, mode="same") / denom * float(fs)
+
+
 def Hanning_filter_func(Nb_MU, FF_FULL, fs=2048):
+    """Smooth binary IDF impulses with a 400 ms Hanning window.
+
+    Return type is compatible with the original code: a numeric vector for one
+    MU, and an object array of vectors for multiple MUs.
     """
-    Drop-in replacement for the original Hanning filter.
+    n = int(Nb_MU)
+    if n == 1:
+        return _filter_one(FF_FULL, fs)
 
-    For multiple MUs, the convolution is vectorized when FF_FULL can be stacked
-    into a regular 2D array. The return type remains compatible: an object array
-    for Nb_MU > 1 and a numeric vector for Nb_MU == 1.
-    """
-    window_length = 0.4  # s, according to De Luca-style FIDF smoothing
-    L = int(window_length * fs)
-    hanning_window = signal.windows.hann(L)
-    sum_han = np.sum(hanning_window)
-
-    if int(Nb_MU) > 1:
-        try:
-            data = np.vstack([np.asarray(FF_FULL[i], dtype=float) for i in range(int(Nb_MU))])
-            filtered = signal.convolve(data, hanning_window[None, :], mode="same") / sum_han
-            filtered = filtered * fs
-            out = np.empty((int(Nb_MU),), dtype=object)
-            for i in range(int(Nb_MU)):
-                out[i] = filtered[i]
-            return out
-        except ValueError:
-            out = np.empty((int(Nb_MU),), dtype=object)
-            for i in range(int(Nb_MU)):
-                filtered = signal.convolve(np.asarray(FF_FULL[i], dtype=float), hanning_window, mode="same") / sum_han
-                out[i] = filtered * fs
-            return out
-
-    filtered_single = signal.convolve(np.asarray(FF_FULL, dtype=float), hanning_window, mode="same") / sum_han
-    return filtered_single * fs
+    try:
+        stacked = np.vstack([np.asarray(FF_FULL[i], dtype=float) for i in range(n)])
+        win, denom = _hanning_window(float(fs))
+        filt = signal.convolve(stacked, win[None, :], mode="same") / denom * float(fs)
+        out = np.empty((n,), dtype=object)
+        for i in range(n):
+            out[i] = filt[i]
+        return out
+    except ValueError:
+        out = np.empty((n,), dtype=object)
+        for i in range(n):
+            out[i] = _filter_one(FF_FULL[i], fs)
+        return out

@@ -1,70 +1,40 @@
-""" 
-Author: Arnault CAILLET
-arnault.caillet17@imperial.ac.uk
-July 2022
-Imperial College London
-Department of Civil Engineering
-This code contributes to producing the results presented in the manuscript Caillet et al. 'Estimation of the firing behaviour of a complete motoneuron pool by combining electromyography signal decomposition and realistic motoneuron modelling' (2022)
----------
-"""
+"""Fit and complete the ARP distribution across identified MNs."""
+
+from __future__ import annotations
 
 import numpy as np
-from Regression import regression
-import matplotlib.pyplot as plt
-from PLOTS import plot_ARP_trendline_func
-def ARP_distrib_func(test, Nb_MN, true_MN_pop, Real_MN_pop, saturating_MN, exp_ARP, muscle, plot, MN_pop):
-    '''
-This function computes a trendline ARP(MN)=a*MN**b fitting the (MN, ARP) pairs
-for the saturating MNs previously identified. The MNs are located in 
-the real MN pool. The ARP of the identified but non saturating MNs is predicted
-from this trendline. 
 
-Parameters
-----------
-$ test : name of the set of experimental data under study, string
-$ Nb_MN : the number of discharging MNs under study, integer
-$ MN_pop : muscle-specific number of MNs in the MN pool, integer
-$ Real_MN_pop : Real MN locations in real MN pool, list
-$ saturating_MN : list of the MNs showing saturation in IDFs, array
-$ exp_ARP : ARPs [s] of the saturating MNs, array
-$ plot : whether the most relevant findings are plotted, string
-Returns
--------
-$ a_arp, b_arp : (MN, ARP) trendline coefficients, floats 
-$ ARP_table : list of ARPs of the (non-)saturating MNs under study, array
-    ''' 
-    
-    if len(saturating_MN)>4: #if enough data is available to derive a power law of ARP values
-        def func_reg(x,a,b): return a*x**b
-        X=Real_MN_pop[saturating_MN][:,0].astype(float) #Saturating MNs in the real population
-        Y=exp_ARP[:,0].astype(float)
-        popt, r2=regression(X,Y, 'power',muscle, MN_pop)
-        a_arp,b_arp =popt[0], popt[1]
-        
-        if plot=='y': plot_ARP_trendline_func(X, Y, true_MN_pop, func_reg, popt, a_arp, b_arp, r2)
-    
-        #Building the final ARP table
-        ARP_table=np.empty((Nb_MN,), dtype=object)
-        ARP_table[saturating_MN]=exp_ARP #first filling the table with the data of the saturating MNs
-        Non_saturating_MN= np.argwhere(ARP_table==None)[:,0] #Indexes of non-saturating MNs
-        ARP_table[Non_saturating_MN]=func_reg(Real_MN_pop[Non_saturating_MN], *popt)#Filling the rest of the table with the trendline
-    
-    else: #Defining a custom ARP law max 30Hz for all MNs (for now)
-        a_arp=0
-        b_arp=0
-        set_ARP=1/30
-        ARP_table=np.ones(Nb_MN)*set_ARP
-        saturating_MN, Non_saturating_MN=0,0
-        if test=='GM_10':
-            set_ARP=1/20
-            ARP_table=np.ones(Nb_MN)*set_ARP    
-    
-    return a_arp,b_arp,ARP_table, saturating_MN, Non_saturating_MN
-            
-            
-            
-            
-            
-            
-            
-            
+from PLOTS import plot_ARP_trendline_func
+from Regression import regression
+
+
+def ARP_distrib_func(test, Nb_MN, true_MN_pop, Real_MN_pop, saturating_MN, exp_ARP, muscle, plot, MN_pop):
+    """Estimate ARP values for both saturating and non-saturating MNs."""
+    n_mn = int(Nb_MN)
+    real_pop = np.asarray(Real_MN_pop, dtype=float).reshape(-1)
+    sat = np.asarray(saturating_MN, dtype=int).reshape(-1)
+    exp = np.asarray(exp_ARP, dtype=float).reshape(-1)
+
+    if sat.size > 4:
+        def func_reg(x, a, b):
+            return a * x**b
+
+        x = real_pop[sat]
+        y = exp
+        popt, r2 = regression(x, y, "power", muscle, MN_pop)
+        a_arp, b_arp = float(popt[0]), float(popt[1])
+        if plot == "y":
+            plot_ARP_trendline_func(x, y, true_MN_pop, func_reg, popt, a_arp, b_arp, r2)
+
+        arp_table = np.asarray(func_reg(real_pop, *popt), dtype=float)
+        arp_table[sat] = y
+        non_saturating = np.setdiff1d(np.arange(n_mn), sat)
+    else:
+        a_arp = 0.0
+        b_arp = 0.0
+        set_arp = 1.0 / 20.0 if test == "GM_10" else 1.0 / 30.0
+        arp_table = np.ones(n_mn, dtype=float) * set_arp
+        non_saturating = np.array([], dtype=int)
+        sat = np.array([], dtype=int)
+
+    return a_arp, b_arp, arp_table, sat, non_saturating

@@ -1,82 +1,61 @@
-""" 
-Author: Arnault CAILLET
-arnault.caillet17@imperial.ac.uk
-July 2022
-Imperial College London
-Department of Civil Engineering
-This code contributes to producing the results presented in the manuscript Caillet et al. 'Estimation of the firing behaviour of a complete motoneuron pool by combining electromyography signal decomposition and realistic motoneuron modelling' (2022)
-----------
-"""
+"""Instantaneous discharge-frequency construction."""
+
+from __future__ import annotations
+
 import numpy as np
 
-def IDF_func(Nb_MN, time,   disch_times, t_start, t_stop, fs=2048):
-    '''
-This function computes from known discharge times the time-history of the 
-instantaneous discharge frequencies (IDFs) of the MNs under study
+from _utils import clip_sample_indices, object_array
 
-Parameters
-----------
-$ Nb_MN : the number of discharging MNs involved in the CST, integer
-$ time : the time-duration of the simulation, array
-    time typically covers the entirety of the duration of the experimental 
-    data, is in [s] with a 1/fs time step
-$ disch_times : the lists of the MN discharge times, matrix
-    if NB_MN==1: disch_times is typically simulated from the LIF model which 
-    returns results in sec
-    elif Nb_MN>1: disch_times is typically experimental, in which case the 
-    values are given in fs-samples
-$ t_start : starting time of the simulation, string
-    Useful if the FIDFs are only useful over a time window narrower than time
-$ t_stop : stopping time of the simulation, string
-    Useful if the FIDFs are only useful over a time window narrower than time
-$ fs : sampling frequency, float
-    Typically 2048Hz, this value is consistent with the exp measures. 
 
-Returns
--------
-$ IDF_dt : lists of MN instantaneous discharge frequencies [Hz], matrix
-$ FF_FULL : lists of discharge times, matrix
-    Example: if the 1st MN discharges for the first time at time t=3/fs [s] at 
-    IDF=12 Hz, FF_FULL = [[0, 0, 1, ...], ...]
-    '''    
-    
-    
-    if Nb_MN==1: #Results in [s] obtained from the LIF model
-        IDF_dt=np.empty((len(disch_times)-1))
-        for j in range(len(IDF_dt)):
-            if disch_times[0]>t_stop*2: #
-                ISI_dt=(disch_times[j+1]-disch_times[j])/fs #[s] interspike interval
-                IDF_dt[j]=1/ISI_dt #[Hz] Corresponding IDF                
-            else: #discharge times given in seconds
-                ISI_dt=(disch_times[j+1]-disch_times[j]) #[s] interspike interval
-                IDF_dt[j]=1/ISI_dt #[Hz] Corresponding IDF
-        
-        FF_FULL=np.zeros(int(fs*(t_stop-t_start))) #size 61440
-        if disch_times[0]<t_stop*2:    #if the discharge times were given in seconds
-            dt_arr=(disch_times*fs).astype(int)-int(t_start*fs) #dt_arr contains the time samples at which the MN discharges
-        else:
-            dt_arr=(disch_times).astype(int)-int(t_start*fs)
-        for j in range(len(dt_arr)-1): #looping for all the MN discharge times
-            dt=int(dt_arr[j]) 
-            FF_FULL[dt]= 1
-        
-    
-    
-    else: #Results in [fs samples] obtained from experiments for all MNs
-        IDF_dt=np.empty((Nb_MN,), dtype=object) 
-        for i in range (Nb_MN):
-            IDF_dt[i]=np.empty(len(disch_times[i])-1)
-            for j in range (len(disch_times[i])-1):
-                ISI_dt=(disch_times[i][j+1]-disch_times[i][j])/fs #[s] interspike interval
-                IDF_dt[i][j]=1/ISI_dt #[Hz] Corresponding IDF
-        
-        FF_FULL=np.empty((Nb_MN,), dtype=object) 
-        for i in range (Nb_MN): 
-            FF_full_MNi=np.zeros(len(time)) #initalizing the binary array for MN i with zeros everywhere
-            dt_arr=disch_times[i] #dt_arr contains the numerotation of the time samples at which MN i discharges
-            for j in range(len(dt_arr)-1): #looping for all the discharge time sample of MN i
-                dt=int(dt_arr[j]) #the discharge time sample is an integer value that will give the index of the time array at which a discharge occurs
-                FF_full_MNi[dt]= 1 
-            FF_FULL[i]= FF_full_MNi
-            
-    return IDF_dt, FF_FULL
+def _infer_samples(spikes, t_stop: float, fs: float) -> np.ndarray:
+    """Accept spike times in seconds or samples and return sample indices."""
+    arr = np.asarray(spikes, dtype=float).ravel()
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return arr.astype(np.int64)
+    # Original convention: values < 2*t_stop are assumed seconds.
+    if arr[0] < 2.0 * float(t_stop):
+        arr = arr * float(fs)
+    return arr.astype(np.int64)
+
+
+def _instantaneous_frequency_from_samples(samples: np.ndarray, fs: float) -> np.ndarray:
+    if samples.size < 2:
+        return np.array([], dtype=float)
+    isi = np.diff(samples) / float(fs)
+    valid = isi > 0
+    out = np.zeros_like(isi, dtype=float)
+    out[valid] = 1.0 / isi[valid]
+    return out
+
+
+def IDF_func(Nb_MN, time, disch_times, t_start, t_stop, fs=2048):
+    """Compute instantaneous discharge frequencies and impulse trains.
+
+    ``FF_FULL`` keeps the original meaning: a binary impulse is placed at each
+    discharge time except the last discharge, so that subsequent Hanning
+    filtering produces the FIDF signal.
+    """
+    n_mn = int(Nb_MN)
+    n_time = len(time)
+    fs = float(fs)
+
+    if n_mn == 1:
+        samples = _infer_samples(disch_times, t_stop=t_stop, fs=fs)
+        idf = _instantaneous_frequency_from_samples(samples, fs=fs)
+        ff_full = np.zeros(int(round(fs * (float(t_stop) - float(t_start)))), dtype=float)
+        idx = samples[:-1] - int(round(float(t_start) * fs))
+        idx = clip_sample_indices(idx, ff_full.size)
+        ff_full[idx] = 1.0
+        return idf, ff_full
+
+    idf_dt = object_array(n_mn)
+    ff_full = object_array(n_mn)
+    for i in range(n_mn):
+        samples = np.asarray(disch_times[i], dtype=float).ravel().astype(np.int64)
+        idf_dt[i] = _instantaneous_frequency_from_samples(samples, fs=fs)
+        impulse = np.zeros(n_time, dtype=float)
+        idx = clip_sample_indices(samples[:-1], n_time)
+        impulse[idx] = 1.0
+        ff_full[i] = impulse
+    return idf_dt, ff_full

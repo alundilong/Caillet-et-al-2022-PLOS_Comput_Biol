@@ -1,32 +1,29 @@
-""" 
-Author: Arnault CAILLET
-arnault.caillet17@imperial.ac.uk
-July 2022
-Imperial College London
-Department of Civil Engineering
-This code contributes to producing the results presented in the manuscript Caillet et al. 'Estimation of the firing behaviour of a complete motoneuron pool by combining electromyography signal decomposition and realistic motoneuron modelling' (2022)
-----------
+"""Initial preprocessing of the force trace and simulation constants."""
 
-Defining some initial parameters and reshaping some input arrays
-"""
-import numpy as np 
+from __future__ import annotations
+
+import numpy as np
+
 
 def preprocessing_func(author, Force, end_force, fs, Nb_MN, plateau_time1, plateau_time2):
-    Force=Force[0:int(end_force*fs)]
-    Force = Force-np.min(Force[:6000]) #removing possible offset
-    
-    #time list of step time 1/fs
-    time=np.linspace(0,end_force,int(end_force*fs)) 
-    #Numbering of the indentified MNs
-    MN_list=np.arange(0,Nb_MN,1)
-    #Giving flexibility on starting and finishing calibrations / plots at different times
-    t_start=0
-    t_stop=end_force
-    t_stop_calib=(plateau_time2+plateau_time1)/2
-    kR=1.68*10**-10
-    Cm_rec=1.3*10**-2
-    step_size=10**-4 #time step s, given in ms; for accurate solutions, the time step needs to be low enough. For high frequencies, prefer 10**-5. 
-    
-    return Force, time, MN_list, t_start, t_stop, t_stop_calib, kR, Cm_rec, step_size
+    """Trim force, remove offset, and define common simulation parameters."""
+    fs = int(fs)
+    n_samples = int(float(end_force) * fs)
 
+    force = np.asarray(Force, dtype=float).ravel()[:n_samples]
+    if force.size < n_samples:
+        raise ValueError(f"Force signal has {force.size} samples, expected at least {n_samples}.")
 
+    baseline_samples = min(6000, force.size)
+    force = force - np.min(force[:baseline_samples])
+    time = np.arange(force.size, dtype=float) / fs
+    mn_list = np.arange(int(Nb_MN), dtype=int)
+
+    t_start = 0.0
+    t_stop = float(end_force)
+    t_stop_calib = (float(plateau_time1) + float(plateau_time2)) / 2.0
+    kR = 1.68e-10
+    Cm_rec = 1.3e-2
+    step_size = 1e-4
+
+    return force, time, mn_list, t_start, t_stop, t_stop_calib, kR, Cm_rec, step_size

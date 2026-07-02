@@ -1,66 +1,53 @@
-""" 
-Author: Arnault CAILLET
-arnault.caillet17@imperial.ac.uk
-July 2022
-Imperial College London
-Department of Civil Engineering
-This code contributes to producing the results presented in the manuscript Caillet et al. 'Estimation of the firing behaviour of a complete motoneuron pool by combining electromyography signal decomposition and realistic motoneuron modelling' (2022)
-----------
-"""
+"""Load and order decomposed HDEMG motoneuron discharge data."""
+
+from __future__ import annotations
+
+from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import scipy.io
 
+
+def _extract_mat_cell_vector(cell_array):
+    """Return a list of 1-D arrays from a MATLAB cell array."""
+    arr = np.asarray(cell_array, dtype=object).squeeze()
+    if arr.ndim == 0:
+        return [np.asarray(arr.item()).squeeze()]
+    return [np.asarray(arr.flat[i]).squeeze() for i in range(arr.size)]
+
+
+def _clean_spike_samples(entry) -> np.ndarray:
+    values = np.asarray(entry, dtype=float).ravel()
+    values = values[np.isfinite(values)]
+    return values.astype(np.int64)
+
+
 def EXP_DATA_PROCESSING_func(author, test):
-    '''
-This function
-    1. loads the .mat file that stores the experimental data (MN discharge times and transducer force time histories)
-    obtained from the decomposition of HDEMG signals. 
-    2. orders the identified MNs in the order of incresaing force recruitment thresholds
+    """Load ``Input_Exp_Data/<test>.mat`` and sort MUs by first discharge.
 
-Parameters
-----------
-author : name of the first author of the paper that provides the experimental data, string
-test : name of the set of experimental data under study, string
+    The ``author`` argument is preserved for API compatibility; the uploaded
+    datasets already encode the required information in their file names.
+    """
+    data_path = Path("Input_Exp_Data") / f"{test}.mat"
+    if not data_path.exists():
+        raise FileNotFoundError(f"Cannot find experimental data file: {data_path}")
 
+    mat = scipy.io.loadmat(data_path)
+    if "MUPulses" not in mat or "ref_signal" not in mat:
+        raise KeyError("The .mat file must contain 'MUPulses' and 'ref_signal'.")
 
-Returns
--------
-Nb_MN : the number of identified MNs in the experimental dataset, integer
-Force : the time-history of transducer Force amplitude, array, arbitrary units
-disch_times : the lists of the MN discharge times, matrix
-    The discharge times are returned in samples (fs=2048 Hz in all datasets). disch_times is not a rectangle matrix.
-    '''
+    force = np.asarray(mat["ref_signal"], dtype=float).squeeze()
+    raw_cells = _extract_mat_cell_vector(mat["MUPulses"])
+    discharge_times = [_clean_spike_samples(cell) for cell in raw_cells]
+    discharge_times = [dt for dt in discharge_times if dt.size > 0]
+    if not discharge_times:
+        raise ValueError(f"No non-empty discharge trains found in {data_path}")
 
-# loading data
-    path_to_data = './Input_Exp_Data/' 
-    mat = scipy.io.loadmat(path_to_data + test+'.mat') 
+    first_discharge = np.array([dt[0] for dt in discharge_times], dtype=float)
+    order = np.argsort(first_discharge)
 
-#Extracting relevant data    
-    for key, value in mat.items(): 
-        if key=='MUPulses':
-            disch_times_raw=np.array((value))[0]
-        if key=='ref_signal':
-            Force=np.array((value))[0]        
-    # print(min(Force))
-    Nb_MN=len(disch_times_raw) #Number of recorded MNs
+    sorted_discharge_times = np.empty((len(order),), dtype=object)
+    for out_idx, raw_idx in enumerate(order):
+        sorted_discharge_times[out_idx] = discharge_times[raw_idx]
 
-# Ordering the spike trains from earliest to latest first discharge time
-    disch_times_disorganised=np.empty((Nb_MN,), dtype=object) 
-    first_disch=np.ones(Nb_MN) #storing the first discharge times, helping in raking the data
-
-# first, reshaping the spike train data, and storing the first discharge times of each spike train    
-    for i in range (Nb_MN): 
-        disch_times_disorganised[i]=disch_times_raw[i][0].astype(object)
-        first_disch[i]=disch_times_disorganised[i][0] #adding the recruitment time
-    
-# then, going through the array of recruitment times, and ranking each index of first_disch to sort the data
-    order = first_disch.argsort()
-    ranks = order.argsort()        
-    disch_times=np.empty((Nb_MN,), dtype=object) 
-    for i in range (Nb_MN): 
-        j=np.argwhere(ranks==i)[0][0]
-        disch_times[i]=disch_times_disorganised[j]        
-                          
-    return  Nb_MN, Force, disch_times
+    return len(sorted_discharge_times), force, sorted_discharge_times

@@ -1,47 +1,86 @@
-""" 
-Author: Arnault CAILLET
-arnault.caillet17@imperial.ac.uk
-July 2022
-Imperial College London
-Department of Civil Engineering
-This code contributes to producing the results presented in the manuscript Caillet et al. 'Estimation of the firing behaviour of a complete motoneuron pool by combining electromyography signal decomposition and realistic motoneuron modelling' (2022)
-----------
+"""Regression utilities used by the MN reconstruction pipeline."""
 
-Convenient code to perform the few regressions necessary in the main codes
-"""
+from __future__ import annotations
+
+from typing import Callable
 
 import numpy as np
 from scipy.optimize import curve_fit
 
-#Tool to obtain regressions and the r2
-def func_Lin(x,a): return a*x
-def func_aff(x,a,b): return a*x+b
-def func_quadra(x,a,b,c):return a*x**2+b*x+c
-def func_cubic(x,a,b,c,d):return a*x**3+b*x**2+c*x+d
-def func_power(x,a,b): return a*x**b    
+
+def func_Lin(x, a):
+    return a * x
 
 
+def func_aff(x, a, b):
+    return a * x + b
 
 
-def regression(X,Y, fun, muscle, MN_pop):#, sigma=None):
+def func_quadra(x, a, b, c):
+    return a * x**2 + b * x + c
 
-    if muscle =='TA' or muscle =='GM':
-        def size_power(x,a,c): return a*2.4**(((x+1)/MN_pop)**c)# a*4**(((x+1)/400)**c)
-        def threshold_power(x,a,b,k): return k*(a*(x+1)/MN_pop+90**(((x+1)/MN_pop)**b))
+
+def func_cubic(x, a, b, c, d):
+    return a * x**3 + b * x**2 + c * x + d
+
+
+def func_power(x, a, b):
+    return a * x**b
+
+
+def _size_power_factory(muscle: str, MN_pop: int) -> Callable:
+    if muscle in {"TA", "GM"}:
+        denominator = float(MN_pop)
     else:
-        def size_power(x,a,c): return a*2.4**(((x+1)/550)**c)# a*4**(((x+1)/400)**c)
-        def threshold_power(x,a,b,k): return k*(a*(x+1)/550+90**(((x+1)/550)**b))   
+        denominator = 550.0
 
-    if fun=='lin': func= func_Lin
-    elif fun=='quadra': func= func_quadra
-    elif fun=='aff': func=func_aff
-    elif fun=='power': func= func_power
-    elif fun=='size': func=size_power
-    elif fun=='threshold': func=threshold_power
+    def size_power(x, a, c):
+        return a * 2.4 ** (((x + 1) / denominator) ** c)
 
-    popt, pcov = curve_fit(func, X,Y)#, sigma=sigma)
-    residuals = Y- func(X, *popt)
-    ss_res = np.sum(residuals**2)
-    ss_tot = np.sum((Y-np.mean(Y))**2)
-    r_squared = 1 - (ss_res / ss_tot)
-    return popt, r_squared
+    return size_power
+
+
+def _threshold_power_factory(muscle: str, MN_pop: int) -> Callable:
+    if muscle in {"TA", "GM"}:
+        denominator = float(MN_pop)
+    else:
+        denominator = 550.0
+
+    def threshold_power(x, a, b, k):
+        return k * (a * (x + 1) / denominator + 90 ** (((x + 1) / denominator) ** b))
+
+    return threshold_power
+
+
+def _select_function(fun: str, muscle: str, MN_pop: int) -> Callable:
+    functions = {
+        "lin": func_Lin,
+        "aff": func_aff,
+        "quadra": func_quadra,
+        "cubic": func_cubic,
+        "power": func_power,
+        "size": _size_power_factory(muscle, MN_pop),
+        "threshold": _threshold_power_factory(muscle, MN_pop),
+    }
+    if fun not in functions:
+        raise ValueError(f"Unknown regression type: {fun!r}. Options: {sorted(functions)}")
+    return functions[fun]
+
+
+def regression(X, Y, fun, muscle, MN_pop):
+    """Fit a named model and return ``(parameters, r_squared)``."""
+    x = np.asarray(X, dtype=float).ravel()
+    y = np.asarray(Y, dtype=float).ravel()
+    mask = np.isfinite(x) & np.isfinite(y)
+    x = x[mask]
+    y = y[mask]
+    if x.size == 0:
+        raise ValueError("Regression received no finite points.")
+
+    func = _select_function(str(fun), str(muscle), int(MN_pop))
+    popt, _ = curve_fit(func, x, y, maxfev=10000)
+    residuals = y - func(x, *popt)
+    ss_res = float(np.sum(residuals**2))
+    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+    r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else 1.0
+    return popt, float(r_squared)
